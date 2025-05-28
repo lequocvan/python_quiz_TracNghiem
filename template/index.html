@@ -1,13 +1,15 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Ứng dụng ôn luyện kiểm tra trắc nghiệm</title>
+    <title>Site ôn luyện trắc nghiệm</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <style>
         /* CSS cho đồng hồ đếm ngược (tùy chọn) */
         #countdown {
             font-size: 1.5em;
             font-weight: bold;
             margin-bottom: 10px;
+            color: red;
         }
         .correct-answer {
             font-weight: bold;
@@ -20,18 +22,60 @@
             margin-top: 5px;
             font-style: italic;
         }
+        .error-message {
+            color: red;
+            font-weight: bold;
+        }
+        .topic-input-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .topic-input-group label {
+            margin-right: 10px;
+        }
+
+        /* CSS cho nút hyperlink */
+        .hyperlink-button {
+            display: inline-block;
+            padding: 10px 10px;
+            font-size: 1em;
+            cursor: pointer;
+            text-align: center;
+            text-decoration: none;
+            color: #fff;
+            background-color: #007bff;
+            border: none;
+            border-radius: 5px;
+            margin-right: 10px;
+        }
+        .hyperlink-button:hover {
+            background-color: #0056b3;
+        }
     </style>
 </head>
 <body>
-    <h1>Ôn luyện kiểm tra trắc nghiệm</h1>
+    <h1>Bây giờ là: <span id="realtimeClock"></span>, <span id="currentDate"></span> </h1>
 
-    <div id="countdown">Thời gian còn lại: <span id="time"></span></div>
+    <a href="http://127.0.0.1:5000/" class="hyperlink-button">Site 127.0.0.1:5000 (ôn luyện)</a>
+    
+    <button id="preset-70A-5B-5C-5D" class="hyperlink-button">70 câu hỏi PCRT, 05 câu 11 nghiệp vụ còn lại</button>
+    <button id="view-leaderboard">Xem Bảng Xếp Hạng</button>
+    <button id="clear-leaderboard">Xóa Bảng Xếp Hạng</button>
+    <p></p>
+
+    <div id="countdown" style="color: burlywood;">Thời gian còn lại: <span id="time"></span></div>
 
     <form id="quiz-settings">
         <label for="duration">Thời gian làm bài (phút):</label>
         <input type="number" id="duration" name="duration" value="60" min="1">
-        <label for="num_questions">Số lượng câu hỏi:</label>
-        <input type="number" id="num_questions" name="num_questions" value="100" min="1">
+        <label for="num_questions">Tổng số lượng câu hỏi:</label>
+        <input type="number" id="num_questions" name="num_questions" value="125" min="1" readonly><br>
+        <div id="topic-inputs-container">
+            </div>
+        <p>Tổng số câu hỏi đã chọn: <span id="total-topic-questions">0</span>/100</p>
+        <p id="form-error-message" class="error-message"></p>
         <button type="submit">Bắt đầu bài thi</button>
     </form>
 
@@ -50,7 +94,42 @@
         <button id="restart-quiz">Làm lại</button>
     </div>
 
+    <div id="leaderboard-container" style="display: none;">
+        <h2>Bảng Xếp Hạng</h2>
+        <table id="leaderboard">
+            <thead>
+                <tr>
+                    <th>Tên</th>
+                    <th>Điểm</th>
+                    <th>Thời gian hoàn thành</th>
+                </tr>
+            </thead>
+            <tbody id="leaderboard-body"></tbody>
+        </table>
+    </div>
+    
+
     <script>
+        const currentDateElement = document.getElementById('currentDate');
+        const now = new Date();
+        const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        currentDateElement.textContent = now.toLocaleDateString('vi-VN', options);
+
+        const realtimeClockElement = document.getElementById('realtimeClock');
+        function updateRealtimeClock() {
+            const now = new Date();
+            const hours = now.getHours().toString().padStart(2, '0');
+            const minutes = now.getMinutes().toString().padStart(2, '0');
+            const seconds = now.getSeconds().toString().padStart(2, '0');
+            realtimeClockElement.textContent = `${hours}:${minutes}:${seconds}`;
+        }
+
+        // Cập nhật đồng hồ ngay lập tức khi tải trang
+        updateRealtimeClock();
+
+        // Cập nhật đồng hồ mỗi giây
+        setInterval(updateRealtimeClock, 1000);
+
         const countdownElement = document.getElementById('countdown');
         const timeDisplay = document.getElementById('time');
         const quizSettingsForm = document.getElementById('quiz-settings');
@@ -65,6 +144,20 @@
         const restartQuizButton = document.getElementById('restart-quiz');
         const durationInput = document.getElementById('duration'); // Lấy input thời gian
 
+        const topicInputsContainer = document.getElementById('topic-inputs-container');
+        const totalTopicQuestionsElement = document.getElementById('total-topic-questions');
+        const numQuestionsInput = document.getElementById('num_questions');
+        const formErrorMessage = document.getElementById('form-error-message');
+
+        const leaderboardContainer = document.getElementById('leaderboard-container');
+        const leaderboardTableBody = document.getElementById('leaderboard-body');
+        const viewLeaderboardButton = document.getElementById('view-leaderboard');
+        const clearLeaderboardButton = document.getElementById('clear-leaderboard'); // Lấy tham chiếu nút xóa
+        let leaderboardData = loadLeaderboard(); // Tải dữ liệu bảng xếp hạng khi trang tải
+        // Đảm bảo nút "Xem Bảng Xếp Hạng" luôn hiển thị
+        if (viewLeaderboardButton) {
+            viewLeaderboardButton.style.display = 'inline-block'; // Hoặc 'block'
+        }
 
         let currentQuestionIndex = 0;
         let allQuestionsData = []; // Lưu trữ toàn bộ dữ liệu câu hỏi
@@ -86,31 +179,192 @@
             return array;
         }
 
+        function updateTopicQuestionCount() {
+            let total = 0;
+            const topicInputs = document.querySelectorAll('#topic-inputs-container input[type="number"]');
+            topicInputs.forEach(input => {
+                total += parseInt(input.value) || 0;
+            });
+            totalTopicQuestionsElement.textContent = total;
+            return total;
+        }
+
+
+        
+        // Lấy danh sách chủ đề khi trang tải
+        // Lấy danh sách chủ đề khi trang tải
+        fetch('/get_topics')
+            .then(response => response.json())
+            .then(topics => {
+                topics.forEach(topic => {
+                    const topicInputGroup = document.createElement('div');
+                    topicInputGroup.className = 'topic-input-group';
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.id = topic;
+                    checkbox.name = topic;
+
+                    const label = document.createElement('label');
+                    label.textContent = topic;
+                    label.setAttribute('for', topic);
+
+
+                    const input = document.createElement('input');
+                    input.type = 'number';
+                    input.value = 0;
+                    input.min = 0;
+                    input.max = 100;
+                    input.disabled = true; // Disable initially
+
+                    checkbox.addEventListener('change', () => {
+                        input.disabled = !checkbox.checked;
+                        updateTopicQuestionCount();
+                        enforceTotalLimit();
+                    });
+
+                    input.addEventListener('change', () => {
+                        updateTopicQuestionCount();
+                        enforceTotalLimit();
+                    });
+
+                    topicInputGroup.appendChild(checkbox);
+                    topicInputGroup.appendChild(label);
+                    topicInputGroup.appendChild(input);
+                    topicInputsContainer.appendChild(topicInputGroup);
+                });
+                updateTopicQuestionCount();
+            });
+
+        function enforceTotalLimit() {
+            const numQuestions = parseInt(numQuestionsInput.value, 10);
+            const topicInputs = document.querySelectorAll('#topic-inputs-container input[type="number"]');
+            let currentTotal = updateTopicQuestionCount();
+
+            topicInputs.forEach(input => {
+                if (!input.disabled) {
+                    let selectedValue = parseInt(input.value, 10) || 0;
+                    input.max = numQuestions - (currentTotal - selectedValue);
+                } else {
+                    input.max = numQuestions;
+                }
+            });
+        }
+
+        
+        // Xử lý preset 70A-5B-5C-5D
+        document.getElementById('preset-70A-5B-5C-5D').addEventListener('click', () => {
+            setPresetTopicCounts({
+                "PCRT": 70,
+                "Đạo đức nghề nghiệp": 5,
+                "Lễ tân ngoại giao": 5,
+                "Văn hóa doanh nghiệp": 5,
+                "Pháp luật liên quan đến hoạt động ngân hàng": 5,
+                "Công nghệ số trong hoạt động ngân hàng": 5,
+                "Tín dụng": 5,
+                "Huy động vốn": 5,
+                "Ebanking": 5,
+                "Thẻ": 5,
+                "Thanh toán trong nước": 5,
+                "Chuyển tiền trong nước": 5
+                // Thêm các chủ đề khác nếu có và số lượng tương ứng
+            });
+        });
+
+        function setPresetTopicCounts(presetCounts) {
+            const topicInputs = document.querySelectorAll('#topic-inputs-container input[type="number"]');
+            const topicCheckboxes = document.querySelectorAll('#topic-inputs-container input[type="checkbox"]');
+
+            // Đặt tất cả về 0 và bỏ chọn
+            topicInputs.forEach(input => {
+                input.value = 0;
+                input.disabled = true;
+            });
+            topicCheckboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
+
+            // Áp dụng các giá trị preset
+            for (const topicName in presetCounts) {
+                const checkbox = document.getElementById(topicName);
+                if (checkbox) {
+                    checkbox.checked = true;
+                    const input = checkbox.nextElementSibling.nextElementSibling; // Lấy input số lượng
+                    if (input) {
+                        input.value = presetCounts[topicName];
+                        input.disabled = false;
+                    }
+                }
+            }
+            updateTopicQuestionCount(); // Cập nhật tổng số câu hỏi đã chọn
+            enforceTotalLimit(); // Đảm bảo giới hạn tổng số câu hỏi
+        }
+
+
         quizSettingsForm.addEventListener('submit', function(event) {
             event.preventDefault();
             const numQuestions = parseInt(document.getElementById('num_questions').value);
             const durationMinutes = parseInt(durationInput.value); // Lấy thời gian từ input
+
+            const totalTopicQuestions = updateTopicQuestionCount();
+
+            formErrorMessage.textContent = '';
+
+            if (totalTopicQuestions > numQuestions) {
+                formErrorMessage.textContent = `Tổng số câu hỏi theo chủ đề (${totalTopicQuestions}) vượt quá tổng số câu hỏi cho phép (${numQuestions}).`;
+                return;
+            }
+
             timeLeft = durationMinutes * 60; // Chuyển sang giây
             correctAnswersCount = 0; // Reset điểm số khi bắt đầu bài thi mới
             currentQuestionIndex = 0;
             selectedAnswers = new Array(numQuestions).fill(null); // Reset mảng câu trả lời
             hasAnswered = false; // Reset trạng thái trả lời
 
+            const topicCounts = {};
+            const topicInputs = document.querySelectorAll('#topic-inputs-container input[type="number"]');
+            const topicCheckboxes = document.querySelectorAll('#topic-inputs-container input[type="checkbox"]');
+
+            topicInputs.forEach((input, index) => {
+                if (topicCheckboxes[index].checked) {
+                    const topicName = topicCheckboxes[index].id;
+                    const topicQuestionCount = parseInt(input.value);
+                    if (topicQuestionCount > 0) {
+                        topicCounts[topicName] = topicQuestionCount;
+                    }
+                }
+            });
+
+            
+            // Gửi dữ liệu dưới dạng JSON
             fetch('/start_quiz', {
                 method: 'POST',
-                body: new FormData(quizSettingsForm)
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    num_questions: numQuestions,
+                    duration: durationMinutes,
+                    topics: topicCounts
+                })
             })
             .then(response => response.json())
             .then(data => {
                 allQuestionsData = data;
                 // Chọn ngẫu nhiên 'numQuestions' từ tổng số câu hỏi
-                const shuffledQuestions = shuffleArray([...allQuestionsData]); // Tạo bản sao để không ảnh hưởng đến mảng gốc
+                const shuffledQuestions = shuffleArray([...allQuestionsData]);
+                // Tạo bản sao để không ảnh hưởng đến mảng gốc
                 questionsData = shuffledQuestions.slice(0, numQuestions);
 
                 quizSettingsForm.style.display = 'none';
                 quizContainer.style.display = 'block';
-                startTimer(); // Bắt đầu đồng hồ đếm ngược
+                startTimer();
+                // Bắt đầu đồng hồ đếm ngược
                 showQuestion();
+            })
+            .catch(error => {
+                console.error("Lỗi khi gửi dữ liệu:", error);
+                formErrorMessage.textContent = "Có lỗi xảy ra khi bắt đầu bài thi. Vui lòng thử lại.";
             });
         });
 
@@ -124,11 +378,6 @@
             const seconds = (timeLeft % 60).toString().padStart(2, '0');
             timeDisplay.textContent = `${minutes}:${seconds}`;
             timeLeft--;
-
-            //let seconds = timeLeft % 60;
-            //seconds = seconds < 10 ? '0' + seconds : seconds;
-            //timeDisplay.textContent = `${minutes}:${seconds}`;
-            //timeLeft--;
 
             if (timeLeft < 0) {
                 clearInterval(timerInterval);
@@ -147,8 +396,9 @@
                 questionElement.textContent = `${currentQuestionIndex + 1}. ${currentQuestion.question_text}`;
                 optionsElement.innerHTML = '';
 
-                // Đảo ngẫu nhiên thứ tự các đáp án
-                const shuffledOptions = shuffleArray([...currentQuestion.options]);
+                // Tách chuỗi options thành mảng
+                const options = currentQuestion.options ? currentQuestion.options.split('|||') : [];  // Thêm kiểm tra null
+                const shuffledOptions = shuffleArray(options);
 
                 shuffledOptions.forEach((option, index) => {
                     const li = document.createElement('li');
@@ -160,7 +410,7 @@
                     input.addEventListener('change', () => {
                         selectedAnswers[currentQuestionIndex] = option;
                         hasAnswered = true;
-                        clearTimeout(questionTimeout); // Hủy bỏ timeout khi người dùng chọn đáp án
+                        clearTimeout(questionTimeout);
                     });
                     optionsElement.appendChild(li);
 
@@ -173,11 +423,9 @@
                 if (currentQuestionIndex === questionsData.length - 1) {
                     submitAnswerButton.style.display = 'inline-block';
                     submitFinalButton.style.display = 'inline-block';
-                    //submitFinalButton.style.display = currentQuestionIndex === questionsData.length - 1 ? 'inline-block' : 'none';
                 } else {
                     submitAnswerButton.style.display = 'inline-block';
                     submitFinalButton.style.display = 'inline-block';
-                    //submitFinalButton.style.display = currentQuestionIndex === questionsData.length - 1 ? 'inline-block' : 'none';
                 }
 
                 // Hẹn giờ tự động hiển thị đáp án và chuyển câu sau 36 giây
@@ -232,20 +480,76 @@
             answerFeedbackElement.style.display = 'block';
             hasAnswered = true; // Coi như đã xử lý câu hỏi
 
+            // Thêm phần đọc thành tiếng
+            if ('speechSynthesis' in window) {
+                const speech = new SpeechSynthesisUtterance();
+                speech.lang = 'vi-VN';
+                speech.text = `Hello! Right Answer is: ${correctAnswer}`;
+                window.speechSynthesis.speak(speech);
+            }
+
             setTimeout(() => {
                 currentQuestionIndex++;
                 showQuestion();
-            }, 2000); // Chuyển sang câu tiếp theo sau 2 giây
+            }, 12000); // Chuyển sang câu tiếp theo sau 12 giây
         }
-
-
 
         // Xử lý sự kiện click nút "Nộp bài"
         submitFinalButton.addEventListener('click', () => {
-            clearTimeout(questionTimeout); // Dừng bộ hẹn giờ 36 giấy đếm cho câu hỏi hiện tại (nếu nó đang chạy)
+            clearTimeout(questionTimeout); // Dừng bộ hẹn giờ 36 giây đếm cho câu hỏi hiện tại (nếu nó đang chạy)
             clearInterval(timerInterval); // Dừng bộ đếm thời gian Tổng của bài thi
             submitQuiz();
         });
+
+
+        function saveScore(score, timeTaken) {
+            const playerName = prompt("Nhập tên của bạn để lưu điểm:");
+            if (playerName) {
+                const newScore = { name: playerName, score: score, time: timeTaken };
+                leaderboardData.push(newScore);
+                leaderboardData.sort((a, b) => b.score - a.score); // Sắp xếp theo điểm giảm dần
+                saveLeaderboard();
+                alert("Điểm của bạn đã được lưu!");
+            }
+        }
+
+        function saveLeaderboard() {
+            localStorage.setItem('quizLeaderboard', JSON.stringify(leaderboardData));
+        }
+
+        function loadLeaderboard() {
+            const storedLeaderboard = localStorage.getItem('quizLeaderboard');
+            return storedLeaderboard ? JSON.parse(storedLeaderboard) : [];
+        }
+
+        function displayLeaderboard() {
+            console.log('Dữ liệu bảng xếp hạng:', leaderboardData);
+            leaderboardTableBody.innerHTML = ''; // Xóa dữ liệu cũ
+            leaderboardData.forEach(entry => {
+                const row = leaderboardTableBody.insertRow();
+                const nameCell = row.insertCell();
+                const scoreCell = row.insertCell();
+                const timeCell = row.insertCell();
+                nameCell.textContent = entry.name;
+                scoreCell.textContent = entry.score;
+                const minutes = Math.floor(entry.time / 60);
+                const seconds = (entry.time % 60).toString().padStart(2, '0');
+                timeCell.textContent = `${minutes}:${seconds}`;
+            });
+            quizSettingsForm.style.display = 'none';
+            quizContainer.style.display = 'none';
+            resultContainer.style.display = 'none';
+            leaderboardContainer.style.display = 'block';
+        }
+
+        function clearLeaderboard() {
+            if (confirm("Bạn có chắc chắn muốn xóa toàn bộ bảng xếp hạng?")) {
+                localStorage.removeItem('quizLeaderboard');
+                leaderboardData = [];
+                displayLeaderboard(); // Cập nhật lại hiển thị bảng xếp hạng
+            }
+        }
+
 
         function submitQuiz() {
             clearInterval(timerInterval); // Dừng đồng hồ khi nộp bài
@@ -263,6 +567,8 @@
             quizContainer.style.display = 'none';
             resultContainer.style.display = 'block';
             scoreElement.textContent = `Bạn đã trả lời đúng ${correctAnswersCount} trên ${questionsData.length} câu hỏi.`;
+            // Lưu điểm sau khi hiển thị kết quả
+            saveScore(correctAnswersCount, (parseInt(durationInput.value) * 60) - timeLeft);
         }
 
 
@@ -281,8 +587,18 @@
             hasAnswered = false;
         });
 
+
+        // Thêm sự kiện lắng nghe cho nút xem bảng xếp hạng
+        viewLeaderboardButton.addEventListener('click', displayLeaderboard);
+
+        // Thêm sự kiện lắng nghe cho nút xóa bảng xếp hạng
+        clearLeaderboardButton.addEventListener('click', clearLeaderboard);
+
+
         // Ẩn nút "Nộp bài" ban đầu
         submitFinalButton.style.display = 'none';
+        
+
     </script>
 </body>
 </html>
